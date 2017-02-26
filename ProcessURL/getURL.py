@@ -5,6 +5,8 @@ import sys
 import urllib
 import pdb
 import datetime
+from dbOperations import insertStockIntoDb, setupDb
+import os.path
 
 def downloadXMLFromCompanyIndex(pathToIndexFile, CIK_list = ['1048445', '1350694']):
 	print 'Index file path:', pathToIndexFile
@@ -53,16 +55,35 @@ def retrieveXMLFile(url, saveFilePath = False):
 	return root
 
 
-def downloadIndexFile(year =  2017, qtr = 1, fileType = "company.idx"):
+def downloadIndexFile(year =  2017, qtr = 1, fileType = "company.idx", force = False):
 	'''
 		fileType: one of the following -> company.idx, master.idx, form.idx  [read https://www.sec.gov/edgar/indices/fullindex.htm for more info]
+		force: If True the file is downloaded even if it already exists
 		Description: given a year and qtr, downlads the file type specified from the edgar database
+
 	'''
+	downloadPath = './Index/' + str(year) + 'Q' + str(qtr) + fileType
+	if force == False:
+		if os.path.isfile(downloadPath):
+			print 'File already exists, use force=True to redownload'
+			return
+			
 	baseURL = 'https://www.sec.gov/Archives/edgar/full-index/'
 	fileContents = retrieveURL(baseURL + '/' + str(year) + '/QTR' + str(qtr) + '/' + fileType )
-	downloadPath = './Index/' + str(year) + 'Q' + str(qtr) + fileType
 	with open(downloadPath, 'w') as outFile:
 		outFile.write(fileContents)
+
+def downloadIndexFilesInRange(beggining, end):
+	'''
+		beggining: beggining year
+		end: ending year
+		downloads all index files from beggining to end (all quarters) 
+	'''
+	for year in xrange(beggining,end+1):
+		for i in xrange(1,5):
+			print 'Downloading ' + str(year) + 'Q' + str(i)
+			downloadIndexFile(year, i)
+
 
 def stripNamespaceFromTag(elem):
 	'''
@@ -70,6 +91,16 @@ def stripNamespaceFromTag(elem):
 	'''
 	if '}' in elem.tag:
 			elem.tag = elem.tag.split('}', 1)[1]  
+
+def convertStrToIntIfPossible(s):
+	'''
+		Convert str to int if possible, otherwise return the str back
+	'''
+	try:
+		ret = int(s)
+	except ValueError:
+		ret = s
+	return ret;
 
 def parseStockXML(xmlStockRoot, ns):
 	'''	
@@ -81,10 +112,10 @@ def parseStockXML(xmlStockRoot, ns):
 		if i.tag == 'shrsOrPrnAmt':
 			stripNamespaceFromTag(i[0])
 			stripNamespaceFromTag(i[1])
-			stockInfo[i[0].tag.strip()] = i[0].text.strip()
-			stockInfo[i[1].tag.strip()] = i[1].text.strip()
+			stockInfo[i[0].tag.strip()] = convertStrToIntIfPossible(i[0].text.strip())
+			stockInfo[i[1].tag.strip()] = convertStrToIntIfPossible(i[1].text.strip())
 		else:
-			stockInfo[i.tag.strip()] = i.text.strip()
+			stockInfo[i.tag.strip()] = convertStrToIntIfPossible(i.text.strip())
 	return stockInfo
 
 def parse13F(pathToFile):
@@ -92,37 +123,38 @@ def parse13F(pathToFile):
 		Parses the .txt 13-f files that we download from the idx files above
 	'''
 	ns = {	
-			'x':'http://www.sec.gov/edgar/thirteenffiler',
+			'13f':'http://www.sec.gov/edgar/thirteenffiler',
 			'infoTable':'http://www.sec.gov/edgar/document/thirteenf/informationtable'
 		 }
 	parser = etree.XMLParser(recover=True) #recovers from broken xml files
 	with open(pathToFile, 'r') as file:
 		doc = file.read()
-		xmlCoverPage = doc[doc.find("<edgarSubmission"):doc.find("</edgarSubmission ")]
+
+		#the entire text file is not a well formed xml document (and causes the parser to stumble) 
+		#so we need to extract the relevant xml snippets by doing the following
+		xmlCoverPage = doc[doc.find("<edgarSubmission"):doc.find("</edgarSubmission ")] 
 		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
 
 		commonData = {}
-		commonData['submissionType'] = xmlRootCoverPage.find('.//x:submissionType',namespaces=ns).text
-		commonData['periodOfReport'] = datetime.datetime.strptime(xmlRootCoverPage.find('.//x:periodOfReport',namespaces=ns).text, "%m-%d-%Y").date()
-		commonData['form13FFileNumber'] = xmlRootCoverPage.find('.//x:form13FFileNumber',namespaces=ns).text
-		commonData['cik'] = xmlRootCoverPage.find('.//x:cik',namespaces=ns).text
-		commonData['fundName'] = xmlRootCoverPage.find('.//x:filingManager/x:name',namespaces=ns).text
+		commonData['submissionType'] = xmlRootCoverPage.find('.//13f:submissionType',namespaces=ns).text
+		commonData['periodOfReport'] = datetime.datetime.strptime(xmlRootCoverPage.find('.//13f:periodOfReport',namespaces=ns).text, "%m-%d-%Y")
+		commonData['form13FFileNumber'] = xmlRootCoverPage.find('.//13f:form13FFileNumber',namespaces=ns).text
+		commonData['cik'] = xmlRootCoverPage.find('.//13f:cik',namespaces=ns).text
+		commonData['fundName'] = xmlRootCoverPage.find('.//13f:filingManager/x:name',namespaces=ns).text
 
 		xmlStockTable = doc[doc.find("<informationTable"):doc.find("</informationTable")]
 		xmlRootStockTable = etree.fromstring(xmlStockTable, parser)
 		stockList = xmlRootStockTable.findall('.//infoTable:infoTable', namespaces=ns)
 		for stock in stockList:
-			stockInfo = parseStockXML(stock, ns)
-			stockInfo.update(commonData)
-			print stockInfo
-			#we need to store this dictionary into a datbase next
+			stockDocument = parseStockXML(stock, ns)
+			stockDocument.update(commonData)
+			insertStockIntoDb(stockDocument)
 
 
 if __name__ == "__main__":
-	parse13F("./Data_13F/2017Q1_1048445.xml")
-	# for year in xrange(1993,2017):
-	# 	for i in xrange(1,5):
-	# 		downloadIndexFile(year, i)
+	downloadIndexFilesInRange(2016,2017)
+	#setupDb()
+	#parse13F("./Data_13F/2017Q1_1048445.xml")
 
 	#xmlTree = retrieveXMLFile('https://www.sec.gov/Archives/edgar/data/921669/000114036117007268/primary_doc.xml', 'test.xml')
     #downloadXMLFromCompanyIndex(sys.argv[1])
