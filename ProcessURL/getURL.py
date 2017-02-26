@@ -7,9 +7,12 @@ import pdb
 import datetime
 from dbOperations import insertStockIntoDb, setupDb
 import os.path
+import re
 
-def downloadXMLFromCompanyIndex(pathToIndexFile, CIK_list = ['1048445', '1350694']):
-	print 'Index file path:', pathToIndexFile
+def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '1040273', '1418814', '1336528', '1365341']):
+	setupDb()
+	downloadIndexFile(year, qtr)
+	pathToIndexFile = getIndexFilePathForYearAndQuarter(year, qtr)
 	baseURL = 'https://www.sec.gov/Archives/'
 	dict = {}
 	lines = open(pathToIndexFile).read().splitlines()
@@ -23,7 +26,9 @@ def downloadXMLFromCompanyIndex(pathToIndexFile, CIK_list = ['1048445', '1350694
 
 	for CIK,URL in dict.items():
 		print(CIK, URL)
-		urllib.urlretrieve (baseURL + URL, './Data_13F/2017Q1_' + CIK + '.xml')  #time need to be a argument
+		fPath = get13FFilePathForYearAndQuarter(year, qtr, CIK)
+		urllib.urlretrieve (baseURL + URL, fPath)
+		parse13F(fPath)
 
 
 def retrieveURL(url):
@@ -54,6 +59,11 @@ def retrieveXMLFile(url, saveFilePath = False):
 	root = etree.fromstring(xmlDoc)
 	return root
 
+def get13FFilePathForYearAndQuarter(year, qtr, cik):
+	return './Data_13F/' + str(year) + 'Q' + str(qtr) + '_' + cik + '.xml'
+
+def getIndexFilePathForYearAndQuarter(year, qtr, fileType = "company.idx"):
+	return './Index/' + str(year) + 'Q' + str(qtr) + fileType
 
 def downloadIndexFile(year =  2017, qtr = 1, fileType = "company.idx", force = False):
 	'''
@@ -62,12 +72,12 @@ def downloadIndexFile(year =  2017, qtr = 1, fileType = "company.idx", force = F
 		Description: given a year and qtr, downlads the file type specified from the edgar database
 
 	'''
-	downloadPath = './Index/' + str(year) + 'Q' + str(qtr) + fileType
+	downloadPath = getIndexFilePathForYearAndQuarter(year, qtr, fileType)
 	if force == False:
 		if os.path.isfile(downloadPath):
 			print 'File already exists, use force=True to redownload'
 			return
-			
+
 	baseURL = 'https://www.sec.gov/Archives/edgar/full-index/'
 	fileContents = retrieveURL(baseURL + '/' + str(year) + '/QTR' + str(qtr) + '/' + fileType )
 	with open(downloadPath, 'w') as outFile:
@@ -122,6 +132,7 @@ def parse13F(pathToFile):
 	'''
 		Parses the .txt 13-f files that we download from the idx files above
 	'''
+	print 'Parsing 13F File ' + pathToFile
 	ns = {	
 			'13f':'http://www.sec.gov/edgar/thirteenffiler',
 			'infoTable':'http://www.sec.gov/edgar/document/thirteenf/informationtable'
@@ -140,21 +151,30 @@ def parse13F(pathToFile):
 		commonData['periodOfReport'] = datetime.datetime.strptime(xmlRootCoverPage.find('.//13f:periodOfReport',namespaces=ns).text, "%m-%d-%Y")
 		commonData['form13FFileNumber'] = xmlRootCoverPage.find('.//13f:form13FFileNumber',namespaces=ns).text
 		commonData['cik'] = xmlRootCoverPage.find('.//13f:cik',namespaces=ns).text
-		commonData['fundName'] = xmlRootCoverPage.find('.//13f:filingManager/x:name',namespaces=ns).text
+		commonData['fundName'] = xmlRootCoverPage.find('.//13f:filingManager/13f:name',namespaces=ns).text
 
-		xmlStockTable = doc[doc.find("<informationTable"):doc.find("</informationTable")]
+		mstart = re.search('<.*informationTable', doc)
+		mend = re.search('</.*informationTable', doc)
+		xmlStockTable = doc[mstart.start(0):mend.end(0)]
 		xmlRootStockTable = etree.fromstring(xmlStockTable, parser)
 		stockList = xmlRootStockTable.findall('.//infoTable:infoTable', namespaces=ns)
 		for stock in stockList:
 			stockDocument = parseStockXML(stock, ns)
 			stockDocument.update(commonData)
-			insertStockIntoDb(stockDocument)
+			if insertStockIntoDb(stockDocument) == False:
+				print 'Unable to insert into db. Skipping this 13-F Form ' + commonData['form13FFileNumber']
+				return
+		print pathToFile + 'Written to db succesfully'
 
 
 if __name__ == "__main__":
-	downloadIndexFilesInRange(2016,2017)
+	for year in xrange(2015, 2017):
+		for qtr in xrange(1, 5):
+			print str(year) + 'Q' + str(qtr) 
+			downloadAndProcess13FFromIndex(year, qtr)
+	#downloadIndexFilesInRange(2016,2017)
 	#setupDb()
-	#parse13F("./Data_13F/2017Q1_1048445.xml")
+	#parse13F("./Data_13F/2016Q4_1418814.xml")
 
 	#xmlTree = retrieveXMLFile('https://www.sec.gov/Archives/edgar/data/921669/000114036117007268/primary_doc.xml', 'test.xml')
     #downloadXMLFromCompanyIndex(sys.argv[1])

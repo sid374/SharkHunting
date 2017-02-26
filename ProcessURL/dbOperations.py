@@ -10,7 +10,7 @@ def setupDb():
 	db.stockCollection.create_index([
 								("cusip", ASCENDING),
                              	("cik", ASCENDING),
-                             	("form13FFileNumber", ASCENDING),
+                             	("periodOfReport", ASCENDING),
                              	("value", ASCENDING)
                                ], unique=True)
 	db.stockCollection.create_index([
@@ -28,5 +28,11 @@ def insertStockIntoDb(stockDocument):
 		This function inserts this entry into the stocks table of the database
 	'''
 	stockCollection = db.stockCollection
-	stockId = stockCollection.insert_one(stockDocument).inserted_id
-	print stockId
+	try:
+		stockId = stockCollection.insert_one(stockDocument).inserted_id
+	except errors.DuplicateKeyError as e:
+		print 'Duplicate found, terminating insertion'
+		return False
+	else:
+		#print str(stockId) + 'Written to db'
+		return True
