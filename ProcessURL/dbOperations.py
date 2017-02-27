@@ -1,4 +1,5 @@
 from pymongo import MongoClient, ASCENDING, errors
+import pdb
 
 client = MongoClient()
 db = client.shark_hunting
@@ -27,6 +28,11 @@ def insertStockIntoDb(stockDocument):
 		stock: dictionary containing stock data
 		This function inserts this entry into the stocks table of the database
 	'''
+	validationKeys = ['cusip', 'cik', 'periodOfReport', 'value']
+	for key in validationKeys:
+		if key not in stockDocument.keys():
+			print 'Key validation failed'
+			return
 	stockCollection = db.stockCollection
 	try:
 		stockId = stockCollection.insert_one(stockDocument).inserted_id

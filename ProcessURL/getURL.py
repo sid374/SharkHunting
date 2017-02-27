@@ -9,7 +9,7 @@ from dbOperations import insertStockIntoDb, setupDb
 import os.path
 import re
 
-def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '1040273', '1418814', '1336528', '1365341']):
+def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '1040273', '1418814', '1336528', '1365341'], force = False):
 	setupDb()
 	downloadIndexFile(year, qtr)
 	pathToIndexFile = getIndexFilePathForYearAndQuarter(year, qtr)
@@ -19,15 +19,22 @@ def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '
 
 	for line in lines:
 		if line.find('13F-HR') != -1:
-			for CIK in CIK_list:
-				if line.find(CIK) != -1:
-					words = line.split()
-					dict.update({CIK:words[-1]});
+			#for CIK in CIK_list:
+			#	if line.find(CIK) != -1:
+			words = line.split()
+			CIK = words[-3]
+			dict.update({CIK:words[-1]});
 
 	for CIK,URL in dict.items():
-		print(CIK, URL)
+		#print(CIK, URL)
 		fPath = get13FFilePathForYearAndQuarter(year, qtr, CIK)
-		urllib.urlretrieve (baseURL + URL, fPath)
+		if force == False and os.path.isfile(fPath):
+			print 'File already exists, use force=True to redownload'
+		else:
+			try:
+				abcabc = urllib.urlretrieve(baseURL + URL, fPath)
+			except:
+				pdb.set_trace()
 		parse13F(fPath)
 
 
@@ -116,6 +123,7 @@ def parseStockXML(xmlStockRoot, ns):
 	'''	
 		Helper function: Given a etree element and namespaces dict with the stock infotable as root, this function parses the stock
 	'''
+	#TODO: Extract specific fields instead of below, so that we can catch errors early
 	stockInfo = {}
 	for i in xmlStockRoot:
 		stripNamespaceFromTag(i)
@@ -124,8 +132,11 @@ def parseStockXML(xmlStockRoot, ns):
 			stripNamespaceFromTag(i[1])
 			stockInfo[i[0].tag.strip()] = convertStrToIntIfPossible(i[0].text.strip())
 			stockInfo[i[1].tag.strip()] = convertStrToIntIfPossible(i[1].text.strip())
-		else:
+		elif i.tag != None and i.text != None:
 			stockInfo[i.tag.strip()] = convertStrToIntIfPossible(i.text.strip())
+	if len(stockInfo.keys()) < 4:
+		pdb.set_trace()
+		print stockInfo
 	return stockInfo
 
 def parse13F(pathToFile):
@@ -144,8 +155,15 @@ def parse13F(pathToFile):
 		#the entire text file is not a well formed xml document (and causes the parser to stumble) 
 		#so we need to extract the relevant xml snippets by doing the following
 		xmlCoverPage = doc[doc.find("<edgarSubmission"):doc.find("</edgarSubmission ")] 
+		if xmlCoverPage == '':
+			print pathToFile + 'Could not be parsed. Manual intervention required'
+			return
 		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
 
+		value = xmlRootCoverPage.find('.//13f:tableValueTotal',namespaces=ns).text
+		if int(value) == 0:
+			print 'Bogus 13F ' + pathToFile
+			return
 		commonData = {}
 		commonData['submissionType'] = xmlRootCoverPage.find('.//13f:submissionType',namespaces=ns).text
 		commonData['periodOfReport'] = datetime.datetime.strptime(xmlRootCoverPage.find('.//13f:periodOfReport',namespaces=ns).text, "%m-%d-%Y")
@@ -168,13 +186,12 @@ def parse13F(pathToFile):
 
 
 if __name__ == "__main__":
-	for year in xrange(2015, 2017):
+	for year in xrange(2016, 2017):
 		for qtr in xrange(1, 5):
 			print str(year) + 'Q' + str(qtr) 
 			downloadAndProcess13FFromIndex(year, qtr)
 	#downloadIndexFilesInRange(2016,2017)
 	#setupDb()
-	#parse13F("./Data_13F/2016Q4_1418814.xml")
-
+	#parse13F("./Data_13F/2016Q1_1635999.xml")
 	#xmlTree = retrieveXMLFile('https://www.sec.gov/Archives/edgar/data/921669/000114036117007268/primary_doc.xml', 'test.xml')
     #downloadXMLFromCompanyIndex(sys.argv[1])
