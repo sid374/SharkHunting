@@ -19,6 +19,7 @@ def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '
 
 	for line in lines:
 		if line.find('13F-HR') != -1:
+			#uncomment following to look for specific cik's only, right now we download ALL 13-F's!
 			#for CIK in CIK_list:
 			#	if line.find(CIK) != -1:
 			words = line.split()
