@@ -2,3 +2,4 @@ Index/
 venv/
 *.pyc
 ProcessURL/Data_13F/
+*.log

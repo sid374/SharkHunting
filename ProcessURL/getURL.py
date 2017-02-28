@@ -8,6 +8,28 @@ import datetime
 from dbOperations import insertStockIntoDb, setupDb
 import os.path
 import re
+import logging
+
+logger = None
+
+def initLogger():
+	global logger
+	logger = logging.getLogger('sharkHunting')
+	logger.setLevel(logging.DEBUG)
+	#create file handler 
+	fh = logging.FileHandler('getURL.log')
+	fh.setLevel(logging.DEBUG)
+	#create stream handler for console 
+	ch = logging.StreamHandler()
+	ch.setLevel(logging.DEBUG)
+	# create formatter and add it to the handlers
+	formatter = logging.Formatter('%(asctime)s - %(funcName)s:%(lineno)d - %(levelname)s - %(message)s')
+	fh.setFormatter(formatter)
+	ch.setFormatter(formatter)
+	# add the handlers to the logger
+	logger.addHandler(fh)
+	logger.addHandler(ch)
+
 
 def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '1040273', '1418814', '1336528', '1365341'], force = False):
 	setupDb()
@@ -27,10 +49,9 @@ def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '
 			dict.update({CIK:words[-1]});
 
 	for CIK,URL in dict.items():
-		#print(CIK, URL)
 		fPath = get13FFilePathForYearAndQuarter(year, qtr, CIK)
 		if force == False and os.path.isfile(fPath):
-			print 'File already exists, use force=True to redownload'
+			logger.info('13F xml already exists, please use force=True to redownload')
 		else:
 			try:
 				abcabc = urllib.urlretrieve(baseURL + URL, fPath)
@@ -83,7 +104,7 @@ def downloadIndexFile(year =  2017, qtr = 1, fileType = "company.idx", force = F
 	downloadPath = getIndexFilePathForYearAndQuarter(year, qtr, fileType)
 	if force == False:
 		if os.path.isfile(downloadPath):
-			print 'File already exists, use force=True to redownload'
+			logger.warn('Index file already exists, use force=True to redownload. ' + downloadPath)
 			return
 
 	baseURL = 'https://www.sec.gov/Archives/edgar/full-index/'
@@ -99,7 +120,7 @@ def downloadIndexFilesInRange(beggining, end):
 	'''
 	for year in xrange(beggining,end+1):
 		for i in xrange(1,5):
-			print 'Downloading ' + str(year) + 'Q' + str(i)
+			logger.debug('Downloading ' + str(year) + 'Q' + str(i)) 
 			downloadIndexFile(year, i)
 
 
@@ -136,15 +157,15 @@ def parseStockXML(xmlStockRoot, ns):
 		elif i.tag != None and i.text != None:
 			stockInfo[i.tag.strip()] = convertStrToIntIfPossible(i.text.strip())
 	if len(stockInfo.keys()) < 4:
-		pdb.set_trace()
-		print stockInfo
+		logger.error('Error parsing stock xml table' + str(stockInfo))
+		return False
 	return stockInfo
 
 def parse13F(pathToFile):
 	'''
 		Parses the .txt 13-f files that we download from the idx files above
 	'''
-	print 'Parsing 13F File ' + pathToFile
+	logger.debug('Parsing 13F File ' + pathToFile) 
 	ns = {	
 			'13f':'http://www.sec.gov/edgar/thirteenffiler',
 			'infoTable':'http://www.sec.gov/edgar/document/thirteenf/informationtable'
@@ -157,42 +178,61 @@ def parse13F(pathToFile):
 		#so we need to extract the relevant xml snippets by doing the following
 		xmlCoverPage = doc[doc.find("<edgarSubmission"):doc.find("</edgarSubmission ")] 
 		if xmlCoverPage == '':
-			print pathToFile + 'Could not be parsed. Manual intervention required'
+			logger.error(pathToFile + 'Could not be parsed. Manual intervention required')
 			return
-		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
 
+		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
 		value = xmlRootCoverPage.find('.//13f:tableValueTotal',namespaces=ns).text
+
 		if int(value) == 0:
-			print 'Bogus 13F ' + pathToFile
+			logger.error('Bogus 13F ' + pathToFile) 
 			return
+
 		commonData = {}
+		commonData['tableTotalValue'] = int(value)
 		commonData['submissionType'] = xmlRootCoverPage.find('.//13f:submissionType',namespaces=ns).text
 		commonData['periodOfReport'] = datetime.datetime.strptime(xmlRootCoverPage.find('.//13f:periodOfReport',namespaces=ns).text, "%m-%d-%Y")
 		commonData['form13FFileNumber'] = xmlRootCoverPage.find('.//13f:form13FFileNumber',namespaces=ns).text
 		commonData['cik'] = xmlRootCoverPage.find('.//13f:cik',namespaces=ns).text
 		commonData['fundName'] = xmlRootCoverPage.find('.//13f:filingManager/13f:name',namespaces=ns).text
+		commonData['xmlFilePath'] = pathToFile
+		accessionNumberMatch = re.search("ACCESSION NUMBER\D*([0-9]+-[0-9]+-[0-9]+)", doc)
+		if  accessionNumberMatch == None:
+			logger.error("Accession number not found in 13F. Aborting")
+			return
+		else:
+			if accessionNumberMatch != None:
+				commonData['accessionNumber'] = accessionNumberMatch.group(1)
 
 		mstart = re.search('<.*informationTable', doc)
 		mend = re.search('</.*informationTable', doc)
+		if mstart == None or mend == None:
+			logger.error('Unable to parse XML for 13F '+ pathToFile + ' Manual intervention required') 
+			return
 		xmlStockTable = doc[mstart.start(0):mend.end(0)]
 		xmlRootStockTable = etree.fromstring(xmlStockTable, parser)
 		stockList = xmlRootStockTable.findall('.//infoTable:infoTable', namespaces=ns)
 		for stock in stockList:
 			stockDocument = parseStockXML(stock, ns)
-			stockDocument.update(commonData)
-			if insertStockIntoDb(stockDocument) == False:
-				print 'Unable to insert into db. Skipping this 13-F Form ' + commonData['form13FFileNumber']
+			if stockDocument == False:
 				return
-		print pathToFile + 'Written to db succesfully'
+			stockDocument.update(commonData)
+			stockDocument['percentValueOfPortfolio'] = float(stockDocument['value']) / float(value)
+			if insertStockIntoDb(stockDocument) == False:
+				logger.error('Unable to insert into db. Skipping this 13-F Form ' + commonData['form13FFileNumber']) 
+				return
+		logger.debug(pathToFile + 'Written to db succesfully') 
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":	
+	initLogger()
+	setupDb()
 	for year in xrange(2016, 2017):
 		for qtr in xrange(1, 5):
 			print str(year) + 'Q' + str(qtr) 
 			downloadAndProcess13FFromIndex(year, qtr)
-	#downloadIndexFilesInRange(2016,2017)
+	downloadIndexFilesInRange(2016,2017)
 	#setupDb()
-	#parse13F("./Data_13F/2016Q1_1635999.xml")
+	#parse13F("./Data_13F/2016Q1_740913.xml")
 	#xmlTree = retrieveXMLFile('https://www.sec.gov/Archives/edgar/data/921669/000114036117007268/primary_doc.xml', 'test.xml')
     #downloadXMLFromCompanyIndex(sys.argv[1])

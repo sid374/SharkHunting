@@ -1,19 +1,26 @@
 from pymongo import MongoClient, ASCENDING, errors
 import pdb
+import logging
 
 client = MongoClient()
 db = client.shark_hunting
+logger = logging.getLogger('sharkHunting.dbOperations')
 
 def setupDb():
 	'''
 		Sets up the collections and indexes for our mongodb instance
 	'''
+	#TODO: make sure unique index is sufficient. I can see some rare loopholes right now
 	db.stockCollection.create_index([
+								("accessionNumber", ASCENDING),
 								("cusip", ASCENDING),
-                             	("cik", ASCENDING),
-                             	("periodOfReport", ASCENDING),
-                             	("value", ASCENDING)
-                               ], unique=True)
+                             	("value", ASCENDING),
+                             	("sshPrnamt", ASCENDING),
+                             	("sshPrnamtType", ASCENDING),
+                             	("investmentDiscretion", ASCENDING),
+                             	("putCall", ASCENDING),
+                             	("otherManager", ASCENDING),
+                               ], unique=True, name="uniqueIndex")
 	db.stockCollection.create_index([
 								("cusip", ASCENDING)
                                ])
@@ -21,6 +28,9 @@ def setupDb():
 								("cik", ASCENDING),
 								("form13FFileNumber", ASCENDING),
 								("value", ASCENDING)
+                               ])
+	db.stockCollection.create_index([
+								("value", ASCENDING),
                                ])
 
 def insertStockIntoDb(stockDocument):
@@ -31,14 +41,13 @@ def insertStockIntoDb(stockDocument):
 	validationKeys = ['cusip', 'cik', 'periodOfReport', 'value']
 	for key in validationKeys:
 		if key not in stockDocument.keys():
-			print 'Key validation failed'
+			logger.error('Key validation failed') 
 			return
 	stockCollection = db.stockCollection
 	try:
 		stockId = stockCollection.insert_one(stockDocument).inserted_id
 	except errors.DuplicateKeyError as e:
-		print 'Duplicate found, terminating insertion'
+		logger.info('Duplicate found while inserting to db, terminating insertion ')
 		return False
 	else:
-		#print str(stockId) + 'Written to db'
 		return True
