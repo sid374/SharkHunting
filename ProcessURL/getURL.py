@@ -34,6 +34,7 @@ def initLogger():
 def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '1040273', '1418814', '1336528', '1365341'], force = False):
 	setupDb()
 	downloadIndexFile(year, qtr)
+	logger.info('Processing index file for ' + str(year) + 'Q ' + str(qtr))
 	pathToIndexFile = getIndexFilePathForYearAndQuarter(year, qtr)
 	baseURL = 'https://www.sec.gov/Archives/'
 	dict = {}
@@ -212,15 +213,18 @@ def parse13F(pathToFile):
 		xmlStockTable = doc[mstart.start(0):mend.end(0)]
 		xmlRootStockTable = etree.fromstring(xmlStockTable, parser)
 		stockList = xmlRootStockTable.findall('.//infoTable:infoTable', namespaces=ns)
+		stockDocumentList = []
 		for stock in stockList:
 			stockDocument = parseStockXML(stock, ns)
 			if stockDocument == False:
 				return
-			stockDocument.update(commonData)
+			#stockDocument.update(commonData)
 			stockDocument['percentValueOfPortfolio'] = float(stockDocument['value']) / float(value)
-			if insertStockIntoDb(stockDocument) == False:
-				logger.error('Unable to insert into db. Skipping this 13-F Form ' + commonData['form13FFileNumber']) 
-				return
+			stockDocumentList.append(stockDocument)
+		commonData['stocks'] = stockDocumentList
+		if insertStockIntoDb(commonData) == False:
+			logger.error('Unable to insert into db. Skipping this 13-F Form ' + commonData['form13FFileNumber']) 
+			return	
 		logger.debug(pathToFile + 'Written to db succesfully') 
 
 
