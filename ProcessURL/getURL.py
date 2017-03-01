@@ -183,7 +183,10 @@ def parse13F(pathToFile):
 			return
 
 		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
-		value = xmlRootCoverPage.find('.//13f:tableValueTotal',namespaces=ns).text
+		try:
+			value = xmlRootCoverPage.find('.//13f:tableValueTotal',namespaces=ns).text
+		except:
+			value = '0' #Making value 0, so that we get into bogus 13f condition
 
 		if int(value) == 0:
 			logger.error('Bogus 13F ' + pathToFile) 

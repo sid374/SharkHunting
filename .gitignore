@@ -3,3 +3,4 @@ venv/
 *.pyc
 ProcessURL/Data_13F/
 *.log
+*DS_Store
