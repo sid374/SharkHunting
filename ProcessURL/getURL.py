@@ -16,7 +16,7 @@ def initLogger():
 	global logger
 	logger = logging.getLogger('sharkHunting')
 	logger.setLevel(logging.DEBUG)
-	#create file handler 
+	#create file handler 13F xml already exists
 	fh = logging.FileHandler('getURL.log')
 	fh.setLevel(logging.DEBUG)
 	#create stream handler for console 
@@ -52,13 +52,14 @@ def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '
 	for CIK,URL in dict.items():
 		fPath = get13FFilePathForYearAndQuarter(year, qtr, CIK)
 		if force == False and os.path.isfile(fPath):
-			logger.info('13F xml already exists, please use force=True to redownload')
+			logger.info('13F xml already exists, please use force=True to redownload, XMLparser skipped')
 		else:
 			try:
 				abcabc = urllib.urlretrieve(baseURL + URL, fPath)
+				parse13F(fPath)
 			except:
 				pdb.set_trace()
-		parse13F(fPath)
+
 
 
 def retrieveURL(url):
