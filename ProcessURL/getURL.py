@@ -57,7 +57,8 @@ def downloadAndProcess13FFromIndex(year, qtr, CIK_list = ['1048445', '921669', '
 			try:
 				abcabc = urllib.urlretrieve(baseURL + URL, fPath)
 				parse13F(fPath)
-			except:
+			except Exception as e:
+				logger.error(e, exc_info=True)
 				pdb.set_trace()
 
 
@@ -186,7 +187,8 @@ def parse13F(pathToFile):
 		xmlRootCoverPage = etree.fromstring(xmlCoverPage, parser)
 		try:
 			value = xmlRootCoverPage.find('.//13f:tableValueTotal',namespaces=ns).text
-		except:
+		except Exception as e:
+			logger.error(e, exc_info=True)
 			value = '0' #Making value 0, so that we get into bogus 13f condition
 
 		if int(value) == 0:
